@@ -6,12 +6,11 @@ use OpenCA::OpenSSL;
 use OpenCA::X509;
 use OpenCA::CRL;
 
-my $openssl = new OpenCA::OpenSSL;
+my $openssl = new OpenCA::OpenSSL( SHELL=>"/usr/bin/openssl" );
 my @tmpfiles = ("cert.pem","priv.key","req.pem");
 
 print "Initializing crypto shell ... \n";
-$openssl->setParams ( SHELL=>"/usr/local/ssl/bin/openssl",
-		      CONFIG=>"/usr/local/mpcNET/stuff/openssl.cnf" );
+$openssl->setParams ( CONFIG=>"/usr/local/OpenCA/stuff/openssl.cnf" );
 
 ## $openssl->setParams ( STDERR => "/dev/null" );
 

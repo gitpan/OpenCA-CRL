@@ -49,19 +49,24 @@
 ## copied and put under another distribution licence
 ## [including the GNU Public Licence.]
 ##
+use strict;
+
 package OpenCA::CRL;
 
-$VERSION = '0.5.25';
+$OpenCA::CRL::VERSION = '0.6.5a';
 
 my %params = {
 	clr => undef, 
+	item => undef,
 	pwd => undef, 
 	crlFormat => undef,
 	pemCRL => undef,
 	derCRL => undef,
 	txtCRL => undef,
-	parsedCRL => undef,
+	parsedItem => undef,
 	backend => undef,
+	beginHeader => undef,
+	endHeader => undef
 };
 
 sub new {
@@ -78,7 +83,7 @@ sub new {
 
         $self->{crl}       = $keys->{DATA};
         $self->{pwd}       = $keys->{PASSWD};
-        $self->{crlFormat} = $keys->{FORMAT};
+        $self->{crlFormat} = ( $keys->{FORMAT} or $keys->{INFORM} or "PEM");
         $self->{backend}   = $keys->{SHELL};
 
 	return if( not $self->{backend} );
@@ -89,8 +94,16 @@ sub new {
 	my $days   = $keys->{DAYS};
 	my $exts   = $keys->{EXTS};
 
-        if( $self->{crlFormat} eq "" ) {
-                $self->{crlFormat} = "PEM";
+	$self->{beginHeader} = "-----BEGIN HEADER-----";
+	$self->{endHeader} = "-----END HEADER-----";
+
+        if ( $infile ne "" ) {
+		my $tmpLine;
+		open( FD, "<$infile" ) or return;
+			while( $tmpLine = <FD> ) {
+				$self->{crl} .= $tmpLine;
+			}
+		close(FD);
         }
 
 	if( ($cacert) or ($cakey) ) {
@@ -108,16 +121,11 @@ sub new {
 
 
         if ( $self->{crl} ne "" ) {
+		$self->{item} = $self->{crl};
+
+		$self->{crl} = $self->getBody( ITEM=>$self->{item} );
                 if ( not $self->initCRL( CRL=>$self->{crl},
                                          FORMAT=>$self->{crlFormat} )) {
-                        return;
-                }
-
-        }
-
-        if ( $infile ne "" ) {
-                if ( not $self->initCRL( FORMAT=>$self->{crlFormat},
-					 INFILE=>$infile )) {
                         return;
                 }
 
@@ -127,57 +135,29 @@ sub new {
 }
 
 
-sub AUTOLOAD {
-    my $self = shift;
-    my $type = ref($self) || return;
-    my $name = $AUTOLOAD;
-    $name =~ s/.*://;   # strip fully-qualified portion
-    unless (exists $self->{$name} ) {
-        return;
-    }
-    if (@_) {
-        return $self->{$name} = shift;
-    } else {
-        return $self->{$name};
-    }
-}
-
 sub initCRL {
         my $self = shift;
         my $keys = { @_ };
 
-        $self->{crl}       = $keys->{CRL};
-        $self->{crlFormat} = $keys->{FORMAT};
-
-	if( $keys->{INFILE} ) {
-		my $line;
-		my $infile = $keys->{INFILE};
-		open( FD, "<$infile" ) or return;
-			while( $line = <FD> ) {
-				$self->{crl} .= $line;
-			}
-		close(FD);
-	}
-
         return if (not $self->{crl});
 
         $self->{pemCRL} = $self->{backend}->dataConvert( DATA=>$self->{crl},
-                                        DATATYPE=>CRL,
+                                        DATATYPE=>"CRL",
                                         INFORM=>$self->{crlFormat},
-                                        OUTFORM=>PEM );
+                                        OUTFORM=>"PEM" );
         $self->{derCRL} = $self->{backend}->dataConvert( DATA=>$self->{crl},
-                                        DATATYPE=>CRL,
+                                        DATATYPE=>"CRL",
                                         INFORM=>$self->{crlFormat},
-                                        OUTFORM=>DER );
+                                        OUTFORM=>"DER" );
         $self->{txtCRL} = $self->{backend}->dataConvert( DATA=>$self->{crl},
-                                        DATATYPE=>CRL,
+                                        DATATYPE=>"CRL",
                                         INFORM=>$self->{crlFormat},
-                                        OUTFORM=>TXT );
+                                        OUTFORM=>"TXT" );
 
-        $self->{parsedCRL} = $self->parseCRL( CRL=>$self->{txtCRL} );
+        $self->{parsedItem} = $self->parseCRL( CRL=>$self->{txtCRL} );
 
         return if ( (not $self->{pemCRL}) or (not $self->{derCRL})
-                 or (not $self->{txtCRL}) or (not $self->{parsedCRL}) );
+                 or (not $self->{txtCRL}) or (not $self->{parsedItem}) );
 
         return 1;
 }
@@ -192,8 +172,8 @@ sub parseCRL {
 	my @certs;
 
 	my $textCRL = $keys->{CRL};
-	my ($head, $body) = 
-	   split(/(Revoked Certificates:[\n\r]|No Revoked Certificates.)/i,
+	my ( $head, $body ) = 
+	    split(/Revoked Certificates:[\n\r]*|No Revoked Certificates./i,
 								 $textCRL);
 
 	return if ( (not $head) or (not $body) );
@@ -210,8 +190,10 @@ sub parseCRL {
 		my ( $line1, $line2 ) = split ( /\n/, $tmp );
 		next if ( (not $line1) or (not $line2) );
 
-		my ( $serial ) = ( $line1 =~ /([a-e\d]+)/i );
-		my ( $date ) = ( $line2 =~ /Revocation Date: (.*)/i );
+		my ( $serial ) =
+			( $line1 =~ /[\s]*([a-f\d]+)/i );
+		my ( $date ) =
+			( $line2 =~ /Revocation Date: (.*)/i );
 
 		if ( length( $serial ) % 2 ) {
 			$serial = "0" . $serial;
@@ -230,8 +212,47 @@ sub parseCRL {
 		  	ISSUER=>$issuer,
 		  	LAST_UPDATE=>$last,
 		  	NEXT_UPDATE=>$next,
+			BODY => $self->getBody( ITEM=> $self->{item} ),
+			ITEM => $self->getBody( ITEM=> $self->{item} ),
+			HEADER => $self->getHeader ( ITEM=>$self->{item} ),
 		  	LIST=>[ @list ]
 		  };
+
+	return $ret;
+}
+
+sub getHeader {
+	my $self = shift;
+	my $keys = { @_ };
+	my $req = $keys->{ITEM};
+
+	my ( $txt, $ret, $i, $key, $val );
+
+	my $beginHeader = $self->{beginHeader};
+	my $endHeader = $self->{endHeader};
+
+	if( ($txt) = ( $req =~ /$beginHeader\n([\S\s\n]+)\n$endHeader/m) ) {
+		foreach $i ( split ( /\n/, $txt ) ) {
+			$i =~ s/\s*=\s*/=/;
+			( $key, $val ) = ( $i =~ /(.*)\s*=\s*(.*)\s*/ );
+			$ret->{$key} = $val;
+		}
+	}
+
+	return $ret;
+}
+
+sub getBody {
+	my $self = shift;
+	my $keys = { @_ };
+
+	my $ret = $keys->{ITEM};
+
+	my $beginHeader 	= $self->{beginHeader};
+	my $endHeader 		= $self->{endHeader};
+
+	## Let's throw away text between the two headers, included
+	$ret =~ s/($beginHeader[\S\s\n]+$endHeader\n)//;
 
 	return $ret;
 }
@@ -246,8 +267,8 @@ sub getTXT {
 sub getParsed {
 	my $self = shift;
 
-	return if ( not $self->{parsedCRL} );
-	return $self->{parsedCRL};
+	return if ( not $self->{parsedItem} );
+	return $self->{parsedItem};
 }
 
 sub getPEM {
