@@ -53,7 +53,7 @@ use strict;
 
 package OpenCA::CRL;
 
-$OpenCA::CRL::VERSION = '0.6.5a';
+$OpenCA::CRL::VERSION = '0.7.5a';
 
 my %params = {
 	clr => undef, 
@@ -124,6 +124,7 @@ sub new {
 		$self->{item} = $self->{crl};
 
 		$self->{crl} = $self->getBody( ITEM=>$self->{item} );
+
                 if ( not $self->initCRL( CRL=>$self->{crl},
                                          FORMAT=>$self->{crlFormat} )) {
                         return;
@@ -172,11 +173,16 @@ sub parseCRL {
 	my @certs;
 
 	my $textCRL = $keys->{CRL};
-	my ( $head, $body ) = 
-	    split(/Revoked Certificates:[\n\r]*|No Revoked Certificates./i,
-								 $textCRL);
+	my ( $head, $body );
 
-	return if ( (not $head) or (not $body) );
+	my $startLine = 'Certificate Revocation List \(CRL\)\:';
+	my $listStartLine = 'Revoked Certificates[\:\.]';
+	my $listEndLine = 'Signature Algorithm\:';
+
+	( $head ) = ( $textCRL =~ /$startLine([\s\S\n]+)$listStartLine/ );
+	( $body ) = ( $textCRL =~ /$listStartLine([\s\S\n]+)$listEndLine/ );
+
+	return if ( not $head );
 
 	( $version ) = ( $head =~ /Version ([a-e\d]+)/i );
 	( $alg )     = ( $head =~ /Signature Algorithm: (.*?)\n/i );
