@@ -49,14 +49,34 @@
 ## copied and put under another distribution licence
 ## [including the GNU Public Licence.]
 ##
+
+## the module's errorcode is 76
+##
+## functions:
+##
+## new		11
+## init		12
+## parseCRL	13
+## getHeader	21
+## getBody	22
+## getTXT	31
+## getParsed	41
+## getPEM	32
+## getDER	33
+## getItem	51
+## getSerial	52
+## setParams    61
+
 use strict;
 
 package OpenCA::CRL;
 
-$OpenCA::CRL::VERSION = '0.7.61';
+our ($errno, $errval);
+
+($OpenCA::CRL::VERSION = '$Revision: 1.17 $' )=~ s/(?:^.*: (\d+))|(?:\s+\$$)/defined $1?"0\.9":""/eg;
 
 my %params = (
-	clr => undef, 
+	crl => undef, 
 	item => undef,
 	pwd => undef, 
 	crlFormat => undef,
@@ -68,6 +88,22 @@ my %params = (
 	beginHeader => undef,
 	endHeader => undef
 );
+
+sub setError {
+	my $self = shift;
+
+	if (scalar (@_) == 4) {
+		my $keys = { @_ };
+		$errval = $keys->{ERRVAL};
+		$errno  = $keys->{ERRNO};
+	} else {
+		$errno  = $_[0];
+		$errval = $_[1];
+	}
+
+	## support for: return $self->setError (1234, "Something fails.") if (not $xyz);
+	return undef;
+}
 
 sub new {
 	my $that = shift;
@@ -86,7 +122,8 @@ sub new {
         $self->{crlFormat} = ( $keys->{FORMAT} or $keys->{INFORM} or "PEM");
         $self->{backend}   = $keys->{SHELL};
 
-	return if( not $self->{backend} );
+	return $self->setError (7611011, "OpenCA::CRL->new: There is no crypto-backend specified.")
+		if( not $self->{backend} );
 
 	my $infile = $keys->{INFILE};
 	my $cakey  = $keys->{CAKEY};
@@ -99,24 +136,39 @@ sub new {
 
 	if (defined($infile) and ($infile ne "") ) {
 		my $tmpLine;
-		open( FD, "<$infile" ) or return;
-			while( $tmpLine = <FD> ) {
-				$self->{crl} .= $tmpLine;
-			}
+		open( FD, "<$infile" ) 
+			or return $self->setError (7611021, "OpenCA::CRL->new: Cannot open infile $infile for reading.");
+		while( $tmpLine = <FD> ) {
+			$self->{crl} .= $tmpLine;
+		}
 		close(FD);
         }
 
-	if( ($cacert) or ($cakey) ) {
-		return unless ( $cacert and $cakey );
+	if (not $self->{crl})
+	{
+	# the can be stored directly in the token ({backend})
+	#
+	#if( ($cacert) or ($cakey) ) {
+	#	return $self->setError (7611031, "OpenCA::CRL->new: You must specify the CA-certificate too ".
+	#				"if you want to issue a CRL.")
+	#		if (not $cacert);
+	#	return $self->setError (7611032, "OpenCA::CRL->new: You must specify the CA's private key too ".
+	#				"if you want to issue a CRL.")
+	#		if (not $cakey);
 
-		$self->{crl} = $self->{backend}->issueCrl( CAKEY=>$cakey,
-					   CACERT=>$cacert,
-					   OUTFORM=>$self->{crlFormat},
-					   DAYS=>$days,
-					   PASSWD=>$self->{pwd},
-					   EXTS=>$exts );
+		$self->{crl} = $self->{backend}->issueCrl(
+		                                          CAKEY      => $cakey,
+		                                          USE_ENGINE => 1,
+		                                          CACERT     => $cacert,
+		                                          OUTFORM    => $self->{crlFormat},
+		                                          DAYS       => $days,
+		                                          PASSWD     => $self->{pwd},
+		                                          EXTS       => $exts,
+		                                          NOUNIQUEDN => $keys->{NOUNIQUEDN} );
 
-		return if ( not $self->{crl} );
+		return $self->setError (7611035, "OpenCA::CRL->new: Failed to issue a new CRL ".
+					"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+			if ( not $self->{crl} );
 	}
 
 
@@ -125,9 +177,9 @@ sub new {
 
 		$self->{crl} = $self->getBody( ITEM=>$self->{item} );
 
-                if ( not $self->initCRL( CRL=>$self->{crl},
-                                         FORMAT=>$self->{crlFormat} )) {
-                        return;
+                if ( not $self->init()) {
+                        return $self->setError (7611041, "OpenCA::CRL->new: Failed to issue a new CRL ".
+						"($errno)\n$errval");
                 }
 
         }
@@ -136,29 +188,22 @@ sub new {
 }
 
 
-sub initCRL {
+sub init {
         my $self = shift;
         my $keys = { @_ };
 
-        return if (not $self->{crl});
+        return $self->setError (7612011, "OpenCA::CRL->init: There is no CRL present.")
+		if (not $self->{crl});
 
-        $self->{pemCRL} = $self->{backend}->dataConvert( DATA=>$self->{crl},
-                                        DATATYPE=>"CRL",
-                                        INFORM=>$self->{crlFormat},
-                                        OUTFORM=>"PEM" );
-        $self->{derCRL} = $self->{backend}->dataConvert( DATA=>$self->{crl},
-                                        DATATYPE=>"CRL",
-                                        INFORM=>$self->{crlFormat},
-                                        OUTFORM=>"DER" );
-        $self->{txtCRL} = $self->{backend}->dataConvert( DATA=>$self->{crl},
-                                        DATATYPE=>"CRL",
-                                        INFORM=>$self->{crlFormat},
-                                        OUTFORM=>"TXT" );
+        $self->{pemCRL} = "";
 
-        $self->{parsedItem} = $self->parseCRL( CRL=>$self->{txtCRL} );
+        $self->{derCRL} = "";
 
-        return if ( (not $self->{pemCRL}) or (not $self->{derCRL})
-                 or (not $self->{txtCRL}) or (not $self->{parsedItem}) );
+        $self->{txtCRL} = "";
+
+        $self->{parsedItem} = $self->parseCRL();
+	return $self->setError (7612021, "OpenCA::CRL->init: Cannot parse CRL ($errno)\n$errval")
+		if (not $self->{parsedItem});
 
         return 1;
 }
@@ -172,56 +217,48 @@ sub parseCRL {
 	my @list;
 	my @certs;
 
-	my $textCRL = $keys->{CRL};
 	my ( $head, $body );
 
-	my $startLine = 'Certificate Revocation List \(CRL\)\:';
-	my $listStartLine = 'Revoked Certificates[\:\.]';
-	my $listEndLine = 'Signature Algorithm\:';
+        my @attList = ( "VERSION", "ISSUER", "NEXTUPDATE", "LASTUPDATE", "SIGNATURE_ALGORITHM", "REVOKED" );
 
-	( $head ) = ( $textCRL =~ /$startLine([\s\S\n]+)$listStartLine/ );
-	( $body ) = ( $textCRL =~ /$listStartLine([\s\S\n]+)$listEndLine/ );
-
-	return if ( not $head );
-
-	( $version ) = ( $head =~ /Version ([a-e\d]+)/i );
-	( $alg )     = ( $head =~ /Signature Algorithm: (.*?)\n/i );
-	( $issuer )  = ( $head =~ /Issuer: (.*?)\n/i );
-	( $last )    = ( $head =~ /Last Update: (.*?)\n/i );
-	( $next )    = ( $head =~ /Next Update: (.*?)\n/i );
+        my $hret = $self->{backend}->getCRLAttribute(
+                        ATTRIBUTE_LIST => \@attList,
+			DATA           => $self->{crl},
+			INFORM         => $self->{crlFormat});
+	if (not $hret) {
+		return $self->setError (7613015, "OpenCA::CRL->parseCRL: Cryptobackend fails ".
+					"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval);
+	}
 
 	## Parse lines ...
-	@certs = split ( /Serial Number: /i, $body );
-	foreach $tmp (@certs) {
-		my ( $line1, $line2 ) = split ( /\n/, $tmp );
-		next if ( (not $line1) or (not $line2) );
-
-		my ( $serial ) =
-			( $line1 =~ /[\s]*([a-f\d]+)/i );
-		my ( $date ) =
-			( $line2 =~ /Revocation Date: (.*)/i );
-
-		if ( length( $serial ) % 2 ) {
-			$serial = "0" . $serial;
+	@certs = split ( /\n/i, $hret->{REVOKED} );
+	for (my $i=0; $i<scalar @certs; $i++)
+	{
+		my $serial = $certs[$i++];
+		my $date   = $certs[$i];
+		my $ext    = "";
+		while ($certs[$i+1] =~ /^  /) {
+			$ext .= $certs[++$i]."\n";
 		}
 
 		my $entry = {
-			SERIAL=>$serial,
-			DATE=>$date }; 
+			SERIAL => $serial,
+			DATE   => $date }; 
 
 		@list = ( @list, $entry );
 	}
 
 	my $ret = {
-			VERSION=>$version,
-			ALGORITHM=>$alg,
-		  	ISSUER=>$issuer,
-		  	LAST_UPDATE=>$last,
-		  	NEXT_UPDATE=>$next,
-			BODY => $self->getBody( ITEM=> $self->{item} ),
-			ITEM => $self->getBody( ITEM=> $self->{item} ),
-			HEADER => $self->getHeader ( ITEM=>$self->{item} ),
-		  	LIST=>[ @list ]
+			VERSION           => $hret->{VERSION},
+			ALGORITHM         => $hret->{SIGNATURE_ALGORITHM},
+		  	ISSUER            => $hret->{ISSUER},
+		  	LAST_UPDATE       => $hret->{LASTUPDATE},
+		  	NEXT_UPDATE       => $hret->{NEXTUPDATE},
+			BODY              => $self->getBody( ITEM=> $self->{item} ),
+			ITEM              => $self->getBody( ITEM=> $self->{item} ),
+			HEADER            => $self->getHeader ( ITEM=>$self->{item} ),
+		  	LIST              => [ @list ],
+			FLAG_EXPORT_STATE => 0
 		  };
 
 	return $ret;
@@ -263,171 +300,100 @@ sub getBody {
 	return $ret;
 }
 
-sub getTXT {
-	my $self = shift;
-
-	return if( not $self->{txtCRL} );
-	return $self->{txtCRL};
-}
-
 sub getParsed {
 	my $self = shift;
 
-	return if ( not $self->{parsedItem} );
+	return $self->setError (7641011, "OpenCA::CRL->getParsed: The CRL was not parsed.")
+		if ( not $self->{parsedItem} );
 	return $self->{parsedItem};
 }
 
 sub getPEM {
 	my $self = shift;
 
-	return if( not $self->{pemCRL} );
+	if ( $self->{crlFormat} eq 'PEM' ) {
+		$self->{crl} =~ s/^\n*//;
+		$self->{crl} =~ s/\n*$/\n/;
+		return $self->{crl};
+	}
+	if (not $self->{pemCRL}) {
+		$self->{pemCRL} = $self->{backend}->dataConvert( DATA=>$self->{crl},
+                                        DATATYPE=>"CRL",
+                                        INFORM=>$self->{crlFormat},
+                                        OUTFORM=>"PEM" );
+		return $self->setError (7632011, "OpenCA::CRL->init: Cannot convert CRL to PEM-format ".
+					"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+			if (not $self->{pemCRL});
+	}
+
 	return $self->{pemCRL};
 }
 
 sub getDER {
 	my $self = shift;
 
-	return if( not $self->{derCRL} );
+	if ( $self->{crlFormat} eq 'DER' ) {
+		return $self->{crl};
+	}
+	if (not $self->{derCRL}) {
+		$self->{derCRL} = $self->{backend}->dataConvert( DATA=>$self->{crl},
+                                        DATATYPE=>"CRL",
+                                        INFORM=>$self->{crlFormat},
+                                        OUTFORM=>"DER" );
+		return $self->setError (7633011, "OpenCA::CRL->getDER: Cannot convert CRL to DER-format ".
+					"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+			if (not $self->{derCRL});
+	}
+
 	return $self->{derCRL};
 }
 
-# Autoload methods go after =cut, and are processed by the autosplit program.
+sub getTXT {
+	my $self = shift;
 
-1;
-__END__
+	if (not $self->{txtCRL}) {
+		$self->{txtCRL} = $self->{backend}->dataConvert( DATA=>$self->{crl},
+                                        DATATYPE=>"CRL",
+                                        INFORM=>$self->{crlFormat},
+                                        OUTFORM=>"TXT" );
+		return $self->setError (7631011, "OpenCA::CRL->getTXT: Cannot convert CRL to TXT-format ".
+				"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+			if (not $self->{txtCRL});
+	}
+
+	return $self->{txtCRL};
+}
+
+sub getItem {
+	my $self = shift;
+	my $txtItem;
+
+	$txtItem  = $self->{beginHeader}."\n";
+        $txtItem .= $self->getHeader ();
+	$txtItem .= $self->{endHeader}."\n";
+	$txtItem .= $self->getPEM ();
+
+	return $txtItem;
+}
+
+sub getSerial {
+	my $self = shift;
+
+	return $self->{backend}->getDigest ( DATA => $self->getPEM() );
+}
+
+sub setParams {
+
+	my $self = shift;
+	my $params = { @_ };
+	my $key;
+
+	foreach $key ( keys %{$params} ) {
+		## we should place the parameters here
+	}
+
+	return 1;
+}
+
 # Below is the stub of documentation for your module. You better edit it!
-
-=head1 NAME
-
-OpenCA::CRL - CRL Management module.
-
-=head1 SYNOPSIS
-
-use OpenCA::CRL;
-
-=head1 DESCRIPTION
-
-This module contains functions to access CRLs infos. It, as the
-OpenCA::X509 module, requires some parameters such as a reference
-to an OpenCA::OpenSSL instance. This module provides a CRL->PERL
-Hashes parsing, no specific crypto functions are performed.
-
-=head1 FUNCTIONS
-
-=head2 sub new () - Create a new instance of the Class.
-
-	Creating a new instance of the module you can provide a
-	valid crl. As a result the crl will be parsed and stored
-	in local variable(s) for later usage. You can generate a
-	new instance of the class either by giving an already
-	issued CRL (see OpenCA::OpenSSL for documentation) or
-	even generate a new CRL if you provide the CACERT and
-	CAKEY. The function will return a self reference. Accepted
-	parameters are:
-
-		SHELL   - An OpenCA::OpenSSL initialized
-			  instance;
-		CRL	- A valid CRL(*);
-		INFILE	- A CRL file(*);
-		FORMAT  - Format of the provided CRL. Supported
-			  are PEM|DER(*);
-		CAKEY	- CA private key file(*);
-		CACERT	- CA certificate file(*);
-		DAYS	- Days the CRL will be valid(*);
-		EXTS	- Extentions section (see openssl.cnf
-			  documentation)(*);
-
-	(*) - Optional Parameters;
-
-	EXAMPLE:
-
-	   my $self->{crl} = new OpenCA::CRL( SHELL=>$openssl, CRL=>$pemCRL );
-
-	NOTE: When you generate a new CRL, you have to provide
-	      BOTH CAKEY and CACERT parameters.
-
-=head2 sub initCRL () - Initialize internal CRL parameters.
-
-	Initialize the module with a provided CRL. You can not
-	generate a new CRL with this function, if you wish to
-	do so you'll have to get a new instance of the class
-	(see the new() function). Accepted parameters are:
-
-		CRL     - Provided CRL(*);
-		INFILE  - A CRL file (one of CRL/INFILE params
-			  is required)(*);
-		FORMAT	- Provided CRL format (PEM|DER)(*);
-
-	(*) - Optional Parameters;
-
-	EXAMPLE:
-
-		if( not $self->{crl}->initCRL(CRL=>$derCRL, FORMAT=>DER)) {
-                     print "Error!";
-                }
-
-=head2 sub getParsed () - Retrieve parsed CRL list
-
-	This function returns an HASH structure with the main CRL
-	data and a list of HASH with SERIAL and DATE of revoked
-	certificates. Returned value is:
-
-		my $ret = { VERSION=>$version,
-                  	    ALGORITHM=>$alg,
-                  	    ISSUER=>$issuer,
-                  	    LAST_UPDATE=>$last,
-                  	    NEXT_UPDATE=>$next,
-                  	    LIST=>[ @list ] };
-
-	Each element of the LIST has the following format:
-	
-		my $element = { SERIAL=>$certSerial,
-				DATE=>$revDate };
-
-
-	EXAMPLE:
-
-		print "VERSION: " . $self->{crl}->getParsed()->{VERSION};
-
-                foreach $rev ( @{ $self->{crl}->getParsed()->{LIST} } ) {
-                    print "SERIAL: " . $rev->{SERIAL} . "\n";
-                    print "DATE: " . $rev->{DATE} . "\n";
-                }
-
-=head2 sub getPEM () - Get the CRL in a PEM format.
-
-	This function accept no arguments and returns the CRL in
-	PEM format.
-
-	EXAMPLE:
-
-		$pem = $crl->getPEM();
-
-=head2 sub getDER () - Get the CRL in a DER format.
-
-	This function accept no arguments and returns the CRL in
-	DER format.
-
-	EXAMPLE:
-
-		$der = $crl->getDER();
-
-=head2 sub getTXT () - Get the CRL in a TXT format.
-
-	This function accept no arguments and returns the CRL in
-	TXT format.
-
-	EXAMPLE:
-
-		print $crl->getTXT();
-
-=head1 AUTHOR
-
-Massimiliano Pala <madwolf@openca.org>
-
-=head1 SEE ALSO
-
-OpenCA::X509, OpenCA::Tools, OpenCA::OpenSSL, OpenCA::REQ,
-OpenCA::TRIStateCGI, OpenCA::Configuration
-
-=cut
+1;
