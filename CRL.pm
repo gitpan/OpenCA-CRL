@@ -53,9 +53,9 @@ use strict;
 
 package OpenCA::CRL;
 
-$OpenCA::CRL::VERSION = '0.7.5a';
+$OpenCA::CRL::VERSION = '0.7.61';
 
-my %params = {
+my %params = (
 	clr => undef, 
 	item => undef,
 	pwd => undef, 
@@ -67,7 +67,7 @@ my %params = {
 	backend => undef,
 	beginHeader => undef,
 	endHeader => undef
-};
+);
 
 sub new {
 	my $that = shift;
@@ -97,7 +97,7 @@ sub new {
 	$self->{beginHeader} = "-----BEGIN HEADER-----";
 	$self->{endHeader} = "-----END HEADER-----";
 
-        if ( $infile ne "" ) {
+	if (defined($infile) and ($infile ne "") ) {
 		my $tmpLine;
 		open( FD, "<$infile" ) or return;
 			while( $tmpLine = <FD> ) {
