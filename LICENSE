@@ -31,6 +31,9 @@
 ## 4. If you include any Windows specific code (or a derivative thereof) from 
 ##    some directory (application code) you must include an acknowledgement:
 ##    "This product includes OpenCA software (www.openca.org)"
+## 5. Special agreements between the OpenCA Project Manager and
+##    software distributors may exclude the latter from being required
+##    to include the acknowledgement within advertising materials.
 ## 
 ## THIS SOFTWARE IS PROVIDED BY OPENCA DEVELOPERS ``AS IS'' AND
 ## ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE

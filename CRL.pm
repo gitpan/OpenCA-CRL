@@ -9,7 +9,7 @@
 ## lhash, DES, etc., code; not just the SSL code.  The documentation
 ## included with this distribution is covered by the same copyright terms
 ## 
-## Copyright remains Massimiliano Pala's, and as such any Copyright notices
+## // Copyright remains Massimiliano Pala's, and as such any Copyright notices
 ## in the code are not to be removed.
 ## If this package is used in a product, Massimiliano Pala should be given
 ## attribution as the author of the parts of the library used.
@@ -26,8 +26,8 @@
 ##    documentation and/or other materials provided with the distribution.
 ## 3. All advertising materials mentioning features or use of this software
 ##    must display the following acknowledgement:
-##    "This product includes OpenCA software written by Massimiliano Pala
-##     (madwolf@openca.org) and the OpenCA Group (www.openca.org)"
+## //   "This product includes OpenCA software written by Massimiliano Pala
+## //    (madwolf@openca.org) and the OpenCA Group (www.openca.org)"
 ## 4. If you include any Windows specific code (or a derivative thereof) from 
 ##    some directory (application code) you must include an acknowledgement:
 ##    "This product includes OpenCA software (www.openca.org)"
@@ -50,7 +50,7 @@
 ## [including the GNU Public Licence.]
 ##
 
-## the module's errorcode is 76
+## // the module's errorcode is 76
 ##
 ## functions:
 ##
@@ -73,7 +73,7 @@ package OpenCA::CRL;
 
 our ($errno, $errval);
 
-($OpenCA::CRL::VERSION = '$Revision: 1.17 $' )=~ s/(?:^.*: (\d+))|(?:\s+\$$)/defined $1?"0\.9":""/eg;
+($OpenCA::CRL::VERSION = '$Revision: 1.6 $' )=~ s/(?:^.*: (\d+))|(?:\s+\$$)/defined $1?"0\.9":""/eg;
 
 my %params = (
 	crl => undef, 
@@ -121,14 +121,18 @@ sub new {
         $self->{pwd}       = $keys->{PASSWD};
         $self->{crlFormat} = ( $keys->{FORMAT} or $keys->{INFORM} or "PEM");
         $self->{backend}   = $keys->{SHELL};
+	$self->{gettext}   = $keys->{GETTEXT};
 
-	return $self->setError (7611011, "OpenCA::CRL->new: There is no crypto-backend specified.")
+	$self->{gettext} = \&$self->gettext if( not $self->{gettext} );
+	return $self->setError (7611011,
+                                $self->{gettext} ("OpenCA::CRL->new: There is no crypto-backend specified."))
 		if( not $self->{backend} );
 
 	my $infile = $keys->{INFILE};
 	my $cakey  = $keys->{CAKEY};
 	my $cacert = $keys->{CACERT};
 	my $days   = $keys->{DAYS};
+	my $hours  = $keys->{HOURS};
 	my $exts   = $keys->{EXTS};
 
 	$self->{beginHeader} = "-----BEGIN HEADER-----";
@@ -137,7 +141,9 @@ sub new {
 	if (defined($infile) and ($infile ne "") ) {
 		my $tmpLine;
 		open( FD, "<$infile" ) 
-			or return $self->setError (7611021, "OpenCA::CRL->new: Cannot open infile $infile for reading.");
+			or return $self->setError (7611021,
+                                      $self->{gettext} ("OpenCA::CRL->new: Cannot open infile __FILENAME__ for reading.",
+                                                        "__FILENAME__", $infile));
 		while( $tmpLine = <FD> ) {
 			$self->{crl} .= $tmpLine;
 		}
@@ -157,17 +163,20 @@ sub new {
 	#		if (not $cakey);
 
 		$self->{crl} = $self->{backend}->issueCrl(
-		                                          CAKEY      => $cakey,
-		                                          USE_ENGINE => 1,
-		                                          CACERT     => $cacert,
-		                                          OUTFORM    => $self->{crlFormat},
-		                                          DAYS       => $days,
-		                                          PASSWD     => $self->{pwd},
-		                                          EXTS       => $exts,
-		                                          NOUNIQUEDN => $keys->{NOUNIQUEDN} );
+		                            CAKEY      => $cakey,
+		                            USE_ENGINE => 1,
+		                            CACERT     => $cacert,
+		                            OUTFORM    => $self->{crlFormat},
+		                            DAYS       => $days,
+		                            HOURS      => $hours,
+		                            PASSWD     => $self->{pwd},
+		                            EXTS       => $exts,
+		                            NOUNIQUEDN => $keys->{NOUNIQUEDN} );
 
-		return $self->setError (7611035, "OpenCA::CRL->new: Failed to issue a new CRL ".
-					"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+		return $self->setError (7611035, 
+                           $self->{gettext} ("OpenCA::CRL->new: Failed to issue a new CRL (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                             "__ERRVAL__", $OpenCA::OpenSSL::errval))
 			if ( not $self->{crl} );
 	}
 
@@ -178,10 +187,11 @@ sub new {
 		$self->{crl} = $self->getBody( ITEM=>$self->{item} );
 
                 if ( not $self->init()) {
-                        return $self->setError (7611041, "OpenCA::CRL->new: Failed to issue a new CRL ".
-						"($errno)\n$errval");
+                        return $self->setError (7611041, 
+                                   $self->{gettext} ("OpenCA::CRL->new: Failed to issue a new CRL (__ERRNO__). __ERRVAL__",
+                                                     "__ERRNO__", $errno,
+                                                     "__ERRVAL__", $errval));
                 }
-
         }
 
 	return $self;
@@ -192,7 +202,8 @@ sub init {
         my $self = shift;
         my $keys = { @_ };
 
-        return $self->setError (7612011, "OpenCA::CRL->init: There is no CRL present.")
+        return $self->setError (7612011, 
+                   $self->{gettext} ("OpenCA::CRL->init: There is no CRL present."))
 		if (not $self->{crl});
 
         $self->{pemCRL} = "";
@@ -202,7 +213,10 @@ sub init {
         $self->{txtCRL} = "";
 
         $self->{parsedItem} = $self->parseCRL();
-	return $self->setError (7612021, "OpenCA::CRL->init: Cannot parse CRL ($errno)\n$errval")
+	return $self->setError (7612021, 
+                   $self->{gettext} ("OpenCA::CRL->init: Cannot parse CRL (__ERRNO__). __ERRVAL__",
+                                     "__ERRNO__", $errno,
+                                     "__ERRVAL__", $errval))
 		if (not $self->{parsedItem});
 
         return 1;
@@ -219,27 +233,32 @@ sub parseCRL {
 
 	my ( $head, $body );
 
-        my @attList = ( "VERSION", "ISSUER", "NEXTUPDATE", "LASTUPDATE", "SIGNATURE_ALGORITHM", "REVOKED" );
+        my @attList = ( "VERSION", "ISSUER", "NEXTUPDATE", "LASTUPDATE", 
+			"SIGNATURE_ALGORITHM", "REVOKED", "SERIAL" );
 
         my $hret = $self->{backend}->getCRLAttribute(
                         ATTRIBUTE_LIST => \@attList,
 			DATA           => $self->{crl},
 			INFORM         => $self->{crlFormat});
 	if (not $hret) {
-		return $self->setError (7613015, "OpenCA::CRL->parseCRL: Cryptobackend fails ".
-					"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval);
+		return $self->setError (7613015, 
+                           $self->{gettext} ("OpenCA::CRL->parseCRL: Cryptobackend fails (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                             "__ERRVAL__", $OpenCA::OpenSSL::errval));
 	}
 
 	## Parse lines ...
 	@certs = split ( /\n/i, $hret->{REVOKED} );
 	for (my $i=0; $i<scalar @certs; $i++)
 	{
-		my $serial = $certs[$i++];
+		my $serial = "" . $certs[$i++];
 		my $date   = $certs[$i];
 		my $ext    = "";
 		while ($certs[$i+1] =~ /^  /) {
 			$ext .= $certs[++$i]."\n";
 		}
+
+		print STDERR "CRL::Found Entry -> $serial ($i)\n";
 
 		my $entry = {
 			SERIAL => $serial,
@@ -254,6 +273,7 @@ sub parseCRL {
 		  	ISSUER            => $hret->{ISSUER},
 		  	LAST_UPDATE       => $hret->{LASTUPDATE},
 		  	NEXT_UPDATE       => $hret->{NEXTUPDATE},
+			SERIAL            => $hret->{SERIAL},
 			BODY              => $self->getBody( ITEM=> $self->{item} ),
 			ITEM              => $self->getBody( ITEM=> $self->{item} ),
 			HEADER            => $self->getHeader ( ITEM=>$self->{item} ),
@@ -294,7 +314,7 @@ sub getBody {
 	my $beginHeader 	= $self->{beginHeader};
 	my $endHeader 		= $self->{endHeader};
 
-	## Let's throw away text between the two headers, included
+	## Let us throw away text between the two headers, included
 	$ret =~ s/($beginHeader[\S\s\n]+$endHeader\n)//;
 
 	return $ret;
@@ -303,7 +323,8 @@ sub getBody {
 sub getParsed {
 	my $self = shift;
 
-	return $self->setError (7641011, "OpenCA::CRL->getParsed: The CRL was not parsed.")
+	return $self->setError (7641011,
+                   $self->{gettext} ("OpenCA::CRL->getParsed: The CRL was not parsed."))
 		if ( not $self->{parsedItem} );
 	return $self->{parsedItem};
 }
@@ -321,8 +342,10 @@ sub getPEM {
                                         DATATYPE=>"CRL",
                                         INFORM=>$self->{crlFormat},
                                         OUTFORM=>"PEM" );
-		return $self->setError (7632011, "OpenCA::CRL->init: Cannot convert CRL to PEM-format ".
-					"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+		return $self->setError (7632011,
+                           $self->{gettext} ("OpenCA::CRL->init: Cannot convert CRL to PEM-format (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                             "__ERRVAL__", $OpenCA::OpenSSL::errval))
 			if (not $self->{pemCRL});
 	}
 
@@ -340,8 +363,10 @@ sub getDER {
                                         DATATYPE=>"CRL",
                                         INFORM=>$self->{crlFormat},
                                         OUTFORM=>"DER" );
-		return $self->setError (7633011, "OpenCA::CRL->getDER: Cannot convert CRL to DER-format ".
-					"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+		return $self->setError (7633011,
+                           $self->{gettext} ("OpenCA::CRL->getDER: Cannot convert CRL to DER-format (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                             "__ERRVAL__", $OpenCA::OpenSSL::errval))
 			if (not $self->{derCRL});
 	}
 
@@ -356,8 +381,10 @@ sub getTXT {
                                         DATATYPE=>"CRL",
                                         INFORM=>$self->{crlFormat},
                                         OUTFORM=>"TXT" );
-		return $self->setError (7631011, "OpenCA::CRL->getTXT: Cannot convert CRL to TXT-format ".
-				"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+		return $self->setError (7631011,
+                           $self->{gettext} ("OpenCA::CRL->getTXT: Cannot convert CRL to TXT-format (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                             "__ERRVAL__", $OpenCA::OpenSSL::errval))
 			if (not $self->{txtCRL});
 	}
 
@@ -379,7 +406,17 @@ sub getItem {
 sub getSerial {
 	my $self = shift;
 
-	return $self->{backend}->getDigest ( DATA => $self->getPEM() );
+	# return the serial if one is present
+	return "".$self->getParsed()->{SERIAL}
+		if ($self->getParsed()->{SERIAL} >= 0);
+
+	# new numbering by timestamp
+	return "".$self->{backend}->getNumericDate (
+	           $self->getParsed()->{LAST_UPDATE}
+	                                        );
+
+	# old numbering by digest
+	# return $self->{backend}->getDigest ( DATA => $self->getPEM() );
 }
 
 sub setParams {
@@ -393,6 +430,103 @@ sub setParams {
 	}
 
 	return 1;
+}
+
+sub getStatus
+{
+    my $self = shift;
+    return $self->{STATUS};
+}
+
+sub setStatus {
+	my $self = shift;
+	my $status = shift;
+
+	my $status_update = undef;
+	my $now = gmtime;
+
+	## Handles special fields like SUSPENDED_AFTER, REVOKED_AFTER, etc.
+	$status =~ s/\_.*//;
+	if (($self->{STATUS} ne $status) and ($status !~ /VALID/)) {
+		$status_update = $status . "_AFTER";
+		if( $self->getParsed()->{HEADER}->{$status_update} eq "" ) {
+			$self->setHeaderAttribute ( $status_update => $now );
+		}
+	}
+
+	$self->{DATATYPE} = $self->{STATUS} . "_CRL";
+	$self->{STATUS} = $status;
+
+	return $self->getStatus();
+}
+
+sub setHeaderAttribute {
+
+  my $self = shift;
+  my $keys = { @_ };
+
+  my $beginHeader = $self->{beginHeader};
+  my $endHeader = $self->{endHeader};
+  my $beginAttribute = $self->{beginAttribute};
+  my $endAttribute = $self->{endAttribute};
+
+  ## check format to be PEM
+  return $self->setError (7651011,
+             $self->{gettext} ("OpenCA::CRL->setHeaderAttribute: The request is not in PEM-format."))
+	if ($self->{reqFormat} !~ /^PEM|CRR|SPKAC$/i);
+  print $self->{gettext} ("CRL->setHeaderAttribute: correct format - PEM")."<br>\n" if ($self->{DEBUG});
+
+  ## check for header
+  if ($self->{item} !~ /$beginHeader/) {
+    ## create header
+    $self->{item} = $beginHeader."\n".$endHeader."\n".$self->{item};
+  }
+
+  for my $attribute (keys %{$keys}) {
+
+    # print STDERR "REQ->setHeaderAttribute: $attribute:=".
+    # 					$keys->{$attribute}."<br>\n";
+
+	next if ( not $attribute );
+
+    ## insert into item
+    ## find last position in header
+    ## enter attributename
+    ## check fo multirow
+    if ($keys->{$attribute} =~ /\n/) {
+      ## multirow
+      $self->{item} =~ s/${endHeader}/${attribute}=\n${beginAttribute}\n$keys->{$attribute}\n${endAttribute}\n${endHeader}/;
+    } else {
+	# print STDERR "REQ::setHeaderAttribute::Setting $attribute = " .
+	# 		$keys->{$attribute} . "\n" if ( $self->{DEBUG} );
+
+      	## Delete old attribute
+	if ( $self->getParsed()->{HEADER}->{$attribute} ) {
+      		$self->{item} =~ s/($attribute[^\n]+\n)//;
+	}
+
+      ## single row
+      $self->{item} =~ s/${endHeader}/${attribute} = $keys->{$attribute}\n${endHeader}/;
+      # print STDERR "REQ::NEW HEADER\n".$self->{item}."\n";
+    }
+  }
+
+  ## if you call init then all information is lost !!!
+  return $self->setError (7651021,
+             $self->{gettext} ("OpenCA::CRL->setHeaderAttribute: Cannot re-initialize the request (__ERRNO__). __ERRVAL__",
+                               "__ERRNO__", $errno,
+                               "__ERRVAL__", $errval))
+  	if (not $self->init ( REQ => $self->{item},
+                    FORMAT      => $self->{reqFormat}));
+
+  return 1;
+}
+
+
+## very simple dummy
+sub gettext
+{
+    return $_[0];
 }
 
 # Below is the stub of documentation for your module. You better edit it!

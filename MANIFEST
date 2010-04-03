@@ -1,7 +1,9 @@
 Changes
 CRL.pm
+CRL.pod
 Makefile.PL
 MANIFEST
 LICENSE
 prova.pl
 test.pl
+META.yml                                 Module meta-data (added by MakeMaker)
